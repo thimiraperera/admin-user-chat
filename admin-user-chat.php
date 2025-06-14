@@ -3,7 +3,7 @@
 Plugin Name: Admin User Chat
 Description: Simple chat between admin and logged-in users.
 Version: 1.0
-Author: Your Name
+Author: Thimira Perera
 */
 
 register_activation_hook(__FILE__, 'auc_install');
@@ -163,14 +163,18 @@ function auc_admin_chat_page() {
 
     if (isset($_GET['user_id'])) {
         $user_id = intval($_GET['user_id']);
+        $user_info = get_userdata($user_id);
 
-    // Mark all messages from this user as read
-    $wpdb->update(
-        $table,
-        ['is_read' => 1],
-        ['sender_id' => $user_id, 'receiver_id' => 1]
-    );
+        $user_email = esc_html($user_info->user_email);
 
+        // Mark all messages from this user as read
+        $wpdb->update(
+            $table,
+            ['is_read' => 1],
+            ['sender_id' => $user_id, 'receiver_id' => 1]
+        );
+
+        // Fetch chat messages
         $messages = $wpdb->get_results($wpdb->prepare(
             "SELECT * FROM $table WHERE 
             (sender_id = %d AND receiver_id = 1) OR 
@@ -178,19 +182,25 @@ function auc_admin_chat_page() {
             ORDER BY created_at ASC", $user_id, $user_id
         ));
 
-		echo "<h2>Conversation with User ID: $user_id</h2><div id='auc-admin-messages' style='max-height:300px; overflow:auto; background:#fff; padding:10px; border:1px solid #ccc;'>";
+        // Header with full name and email
+        echo "<h2 style='margin-bottom: 5px;'>Chat with: <strong>$user_name</strong></h2>";
+        echo "<p>Email: <a href='mailto:$user_email'>$user_email</a></p>";
+
+        // Message display area
+        echo "<div id='auc-admin-messages' style='max-height:300px; overflow:auto; background:#fff; padding:10px; border:1px solid #ccc;'>";
         foreach ($messages as $msg) {
             $from = $msg->sender_id == 1 ? 'Admin' : 'User';
             echo "<p><strong>$from:</strong> " . esc_html($msg->message) . "</p>";
         }
         echo "</div>";
 
+        // Admin reply box
         echo '<div style="margin-top:15px;">
-				<textarea id="auc-admin-reply" rows="3" cols="50" placeholder="Type your reply..."></textarea><br>
-				<button id="auc-admin-send" class="button button-primary">Send Reply</button>
-			</div>';
+                <textarea id="auc-admin-reply" rows="3" cols="50" placeholder="Type your reply..."></textarea><br>
+                <button id="auc-admin-send" class="button button-primary">Send Reply</button>
+            </div>';
 
-        // Handle form submit
+        // Optional manual form handler
         if (isset($_POST['send_reply'])) {
             $message = sanitize_text_field($_POST['admin_reply']);
             $wpdb->insert($table, [
@@ -202,7 +212,10 @@ function auc_admin_chat_page() {
             echo "<script>setTimeout(() => location.reload(), 1000);</script>";
         }
     } else {
-	echo "<table class='widefat'><thead><tr><th>Name</th><th>Email</th><th>Action</th></tr></thead><tbody>";
+    echo "<table class='widefat'>
+        <thead><tr><th>Name</th><th>Email</th><th>Action</th></tr></thead>
+        <tbody>";
+
     foreach ($users as $user) {
         $user_id = $user->sender_id;
         $user_info = get_userdata($user_id);
@@ -216,17 +229,34 @@ function auc_admin_chat_page() {
         if ($user_info) {
             $name = esc_html($user_info->display_name);
             $email = esc_html($user_info->user_email);
+
+            $email_link = "<a href='mailto:$email'>$email</a>";
+            $copy_button = "<button class='button button-small auc-copy-btn' data-email='$email'>Copy</button>";
+
             $badge = $unread_count > 0 ? "<span style='color:red;'>($unread_count new)</span>" : "";
 
             echo "<tr>
                     <td>$name $badge</td>
-                    <td>$email</td>
+                    <td>$email_link $copy_button</td>
                     <td><a class='button' href='?page=auc-user-chats&user_id={$user_id}'>Open Chat</a></td>
                 </tr>";
         }
     }
-	echo "</tbody></table>";
+
+    echo "</tbody></table>";
     }
+
+    // Add copy-to-clipboard functionality
+    echo "<script>
+    jQuery(document).ready(function($) {
+        $('.auc-copy-btn').on('click', function() {
+            const email = $(this).data('email');
+            navigator.clipboard.writeText(email).then(function() {
+                // no message shown after copy
+            });
+        });
+    });
+    </script>";
 
     echo "</div>";
 }

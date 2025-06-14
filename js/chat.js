@@ -35,5 +35,5 @@ jQuery(document).ready(function ($) {
 	});
 
     fetchMessages();
-    setInterval(fetchMessages, 3000);
+    setInterval(fetchMessages, 2000);
 });
