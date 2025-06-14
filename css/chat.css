@@ -1,0 +1,34 @@
+#auc-chat-box {
+    border: 1px solid #ccc;
+    width: 100%;
+    max-width: 500px;
+    padding: 10px;
+    background: #f9f9f9;
+}
+#auc-messages {
+    max-height: 300px;
+    overflow-y: auto;
+    margin-bottom: 10px;
+}
+.msg {
+    padding: 5px;
+    margin-bottom: 5px;
+    border-radius: 4px;
+}
+.msg.user {
+    background: #d0f0fd;
+    text-align: left;
+}
+.msg.admin {
+    background: #ffe0b3;
+    text-align: right;
+}
+#auc-input {
+    width: 100%;
+    height: 60px;
+}
+#auc-send {
+    width: 100%;
+    padding: 10px;
+    margin-top: 5px;
+}
