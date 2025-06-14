@@ -1,23 +1,34 @@
 jQuery(document).ready(function ($) {
-
-    let isInitialLoad = true;
-
-    // Configuration variables from PHP
+    // Configuration
     const ajaxUrl = auc_admin_ajax.ajax_url;
     const nonce = auc_admin_ajax.nonce;
     const userId = auc_admin_ajax.user_id;
     const adminId = auc_admin_ajax.admin_id;
     
-    // DOM elements
-    const messagesContainer = $('#auc-admin-messages');
+    // Elements
+    const container = $('#auc-admin-messages');
     const replyField = $('#auc-admin-reply');
-    const sendButton = $('#auc-admin-send');
-    const deleteButton = $('#auc-admin-delete');
+    const sendBtn = $('#auc-admin-send');
+    const deleteBtn = $('#auc-admin-delete');
     
-    // Function to fetch messages (for polling)
-    function fetchAdminMessages() {
-        if (!userId) return;
+    // State
+    let lastMessageId = 0;
+    
+    // Initialize
+    if (userId) {
+        // Extract IDs from PHP-rendered messages
+        container.find('.msg').each(function() {
+            const id = $(this).data('id');
+            if (id > lastMessageId) lastMessageId = id;
+        });
         
+        // Setup polling with incremental updates
+        fetchNewMessages();
+        setInterval(fetchNewMessages, 5000);
+    }
+
+    // Fetch only NEW messages
+    function fetchNewMessages() {
         $.ajax({
             url: ajaxUrl,
             method: 'POST',
@@ -25,80 +36,52 @@ jQuery(document).ready(function ($) {
                 action: 'auc_fetch_admin_messages',
                 user_id: userId,
                 admin_id: adminId,
+                last_id: lastMessageId,
                 nonce: nonce
             },
             dataType: 'json',
-            success: function (data) {
-                if (data && !data.error) {
-                    if (isInitialLoad) {
-                        messagesContainer.empty();
-                        isInitialLoad = false;
-                    }
-                    renderAdminMessages(data);
+            success: function(messages) {
+                if (messages.length > 0) {
+                    renderMessages(messages);
+                    // Update last known ID
+                    lastMessageId = messages[messages.length-1].id;
                 }
-            },
-            error: function (xhr, status, error) {
-                console.error('Error fetching messages:', error);
             }
         });
     }
-
-    if (userId) {
-        fetchAdminMessages(); // Initial load
-        setInterval(fetchAdminMessages, 10000);
-    }
     
-    // Function to render new messages only (for polling)
-    function renderAdminMessages(messages) {
-        if (messages.length === 0) return;
-        
-        const existingIds = [];
-        messagesContainer.find('.msg').each(function() {
-            existingIds.push($(this).data('id'));
-        });
-        
-        let lastDate = messagesContainer.find('.msg-date').last().text();
-        let addedNew = false;
+    // Render new messages (appends only)
+    function renderMessages(messages) {
+        let lastDate = container.find('.msg-date').last().text() || null;
         
         messages.forEach(msg => {
-            // Skip if message already exists
-            if (existingIds.includes(msg.id)) return;
-            
-            addedNew = true;
             const sender = msg.sender_id == adminId ? 'admin' : 'user';
             const msgDate = new Date(msg.created_at);
             const dateStr = msgDate.toLocaleDateString();
-            const timeStr = msgDate.toLocaleTimeString([], { 
-                hour: '2-digit', 
-                minute: '2-digit' 
-            });
+            const timeStr = msgDate.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
             
-            // Add date separator if needed
+            // Add date header if new day
             if (lastDate !== dateStr) {
-                messagesContainer.append(`<div class="msg-date">${dateStr}</div>`);
+                container.append(`<div class="msg-date">${dateStr}</div>`);
                 lastDate = dateStr;
             }
             
-            // Add new message
-            const escapedMessage = $('<div>').text(msg.message).html();
-            const formattedMessage = escapedMessage.replace(/\n/g, '<br>');
-            
-            messagesContainer.append(`
+            // Add message
+            const escapedMsg = $('<div>').text(msg.message).html();
+            container.append(`
                 <div class="msg ${sender}" data-id="${msg.id}">
-                    <strong>${sender === 'admin' ? 'Admin' : 'User'}:</strong> 
-                    ${formattedMessage}
+                    <strong>${sender === 'admin' ? 'Admin' : 'User'}:</strong>
+                    ${escapedMsg.replace(/\n/g, '<br>')}
                     <br><small>${timeStr}</small>
                 </div>
             `);
         });
         
-        // Scroll to bottom if new messages were added
-        if (addedNew) {
-            messagesContainer.scrollTop(messagesContainer[0].scrollHeight);
-        }
+        // Auto-scroll to new messages
+        container.scrollTop(container[0].scrollHeight);
     }
     
-    // Function to send message
+    // Send message function (unchanged)
     function sendAdminMessage() {
         const message = replyField.val().trim();
         if (!message) return;
@@ -112,30 +95,28 @@ jQuery(document).ready(function ($) {
                 receiver_id: userId,
                 nonce: nonce
             },
-            dataType: 'json',
-            beforeSend: function() {
-                sendButton.prop('disabled', true);
+            beforeSend: () => sendBtn.prop('disabled', true),
+            success: () => {
+                replyField.val('');
+                fetchNewMessages(); // Refresh after send
             },
-            success: function (data) {
-                if (data.success) {
-                    replyField.val('');
-                    fetchAdminMessages(); // Refresh to show new message
-                } else {
-                    console.error('Error sending message:', data.error);
-                }
-            },
-            error: function (xhr, status, error) {
-                console.error('AJAX error:', error);
-            },
-            complete: function() {
-                sendButton.prop('disabled', false);
-            }
+            complete: () => sendBtn.prop('disabled', false)
         });
     }
     
-    // Function to delete chat history
+    // Event handlers
+    sendBtn.on('click', sendAdminMessage);
+    deleteBtn.on('click', deleteChatHistory);
+    replyField.on('keydown', e => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            sendAdminMessage();
+        }
+    });
+    
+    // Delete function (unchanged)
     function deleteChatHistory() {
-        if (!confirm('Are you sure you want to delete this entire chat history?')) return;
+        if (!confirm('Delete entire chat history?')) return;
         
         $.ajax({
             url: ajaxUrl,
@@ -145,47 +126,10 @@ jQuery(document).ready(function ($) {
                 user_id: userId,
                 nonce: nonce
             },
-            dataType: 'json',
-            beforeSend: function() {
-                deleteButton.prop('disabled', true);
-            },
-            success: function (data) {
-                if (data.success) {
-                    alert('Chat history deleted!');
-                    location.reload();
-                } else {
-                    alert('Error: ' + (data.error || 'Failed to delete chat history.'));
-                }
-            },
-            error: function (xhr, status, error) {
-                console.error('AJAX error:', error);
-                alert('Error: ' + error);
-            },
-            complete: function() {
-                deleteButton.prop('disabled', false);
-            }
+            beforeSend: () => deleteBtn.prop('disabled', true),
+            success: () => location.reload(),
+            error: (xhr) => alert('Error: ' + xhr.responseText),
+            complete: () => deleteBtn.prop('disabled', false)
         });
-    }
-    
-    // Event handlers
-    sendButton.on('click', function (e) {
-        e.preventDefault();
-        sendAdminMessage();
-    });
-    
-    replyField.on('keydown', function (e) {
-        if (e.key === 'Enter' && !e.shiftKey) {
-            e.preventDefault();
-            sendAdminMessage();
-        }
-    });
-    
-    deleteButton.on('click', function () {
-        deleteChatHistory();
-    });
-    
-    // Only set up polling if we're in a chat
-    if (userId) {
-        setInterval(fetchAdminMessages, 10000); // 10 seconds
     }
 });

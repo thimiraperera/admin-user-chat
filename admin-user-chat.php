@@ -87,6 +87,7 @@ function auc_fetch_admin_messages() {
     global $wpdb;
     $user_id = intval($_POST['user_id']);
     $admin_id = intval($_POST['admin_id']);
+    $last_id = isset($_POST['last_id']) ? intval($_POST['last_id']) : 0;
     $table = $wpdb->prefix . 'auc_messages';
 
     // Mark messages as read
@@ -96,13 +97,18 @@ function auc_fetch_admin_messages() {
         $admin_id, $user_id
     ));
 
-    // Get messages
+    // Get only NEW messages
     $messages = $wpdb->get_results($wpdb->prepare(
-        "SELECT * FROM $table WHERE 
-        (sender_id = %d AND receiver_id = %d) OR 
-        (sender_id = %d AND receiver_id = %d) 
+        "SELECT * FROM $table 
+        WHERE id > %d
+        AND (
+            (sender_id = %d AND receiver_id = %d) OR 
+            (sender_id = %d AND receiver_id = %d)
+        )
         ORDER BY created_at ASC", 
-        $user_id, $admin_id, $admin_id, $user_id
+        $last_id, 
+        $user_id, $admin_id, 
+        $admin_id, $user_id
     ));
     
     wp_send_json($messages);
@@ -357,7 +363,8 @@ function auc_admin_chat_page() {
                 // Preserve line breaks
                 $escaped_message = nl2br($escaped_message);
                 
-                echo '<div class="msg ' . esc_attr($sender) . '">';
+                // echo '<div class="msg ' . esc_attr($sender) . '">';
+                echo '<div class="msg ' . esc_attr($sender) . '" data-id="' . esc_attr($msg->id) . '">';
                 echo '<strong>' . ($sender == 'admin' ? 'Admin' : 'User') . ':</strong> ';
                 echo $escaped_message;
                 echo '<br><small>' . esc_html($timeStr) . '</small>';
