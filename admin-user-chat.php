@@ -122,6 +122,22 @@ function auc_send_admin_message() {
     wp_send_json_success();
 }
 
+// Delete Chat History
+add_action('wp_ajax_auc_delete_chat', 'auc_delete_chat');
+function auc_delete_chat() {
+    if (!current_user_can('manage_options')) wp_send_json_error('Unauthorized');
+
+    global $wpdb;
+    $user_id = intval($_POST['user_id']);
+    $table = $wpdb->prefix . 'auc_messages';
+
+    $wpdb->query($wpdb->prepare(
+        "DELETE FROM $table WHERE (sender_id = %d AND receiver_id = 1) OR (sender_id = 1 AND receiver_id = %d)",
+        $user_id, $user_id
+    ));
+
+    wp_send_json_success();
+}
 
 // Add admin menu
 add_action('admin_menu', function () {
@@ -200,9 +216,10 @@ function auc_admin_chat_page() {
 
         // Admin reply box
         echo '<div style="margin-top:15px;">
-                <textarea id="auc-admin-reply" rows="3" cols="50" placeholder="Type your reply..."></textarea><br>
-                <button id="auc-admin-send" class="button button-primary">Send Reply</button>
-            </div>';
+            <textarea id="auc-admin-reply" rows="3" cols="50" placeholder="Type your reply..."></textarea><br>
+            <button id="auc-admin-send" class="button button-primary">Send Reply</button>
+            <button id="auc-admin-delete" class="button button-secondary" style="margin-left: 10px; background: #dc3545; color: white;">Delete Chat History</button>
+        </div>';
 
         // Optional manual form handler
         if (isset($_POST['send_reply'])) {
@@ -274,6 +291,25 @@ function auc_admin_chat_page() {
     });
     </script>";
 
+    echo "<script>
+    jQuery(document).ready(function($) {
+        $('#auc-admin-delete').on('click', function () {
+            if (!confirm('Are you sure you want to delete this entire chat history?')) return;
+
+            $.post(ajaxurl, {
+                action: 'auc_delete_chat',
+                user_id: " . (isset($_GET['user_id']) ? intval($_GET['user_id']) : 0) . "
+            }, function (response) {
+                if (response.success) {
+                    alert('Chat history deleted!');
+                    location.reload();
+                } else {
+                    alert('Error deleting chat history.');
+                }
+            });
+        });
+    });
+    </script>";
 
     echo "</div>";
 }
