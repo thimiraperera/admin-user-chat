@@ -335,7 +335,7 @@ function auc_admin_chat_page() {
         echo '<a href="' . admin_url('admin.php?page=auc-user-chats') . '" class="button">← Back to All Users</a>';
         
         // Chat container with preloaded messages
-        echo '<div id="auc-admin-messages" style="max-height:400px; overflow:auto; margin:20px 0; padding:15px; border:1px solid #ddd; background:#fff;">';
+        echo '<div id="auc-admin-messages" style="max-height:400px; overflow:auto; margin:20px 0; padding:15px;">';
         if (empty($messages)) {
             echo '<div class="auc-empty">No messages yet. Start the conversation!</div>';
         } else {
@@ -367,10 +367,10 @@ function auc_admin_chat_page() {
         echo '</div>';
         
         // Reply area
-        echo '<div>
+        echo '<div style="display: flex; flex-wrap: wrap; gap: 10px;">
             <textarea id="auc-admin-reply" rows="3" style="width:100%;" placeholder="Type your reply..."></textarea>
             <button id="auc-admin-send" class="button button-primary">Send</button>
-            <button id="auc-admin-delete" class="button button-secondary" style="background:#dc3545;color:white;">Delete Chat History</button>
+            <button id="auc-admin-delete" class="button button-secondary">Delete Chat History</button>
             <a href="' . admin_url('admin-ajax.php?action=auc_export_chat&user_id=' . $user_id . '&nonce=' . wp_create_nonce('export_chat_' . $user_id)) . '" class="button">Export Chat</a>
         </div>';
         
@@ -451,13 +451,23 @@ function auc_export_chat() {
     
     echo "Chat History with {$user_info->display_name} ({$user_info->user_email})\n";
     echo "Exported on: " . date('F j, Y \a\t g:i a') . "\n\n";
-    echo str_repeat('=', 50) . "\n\n";
     
+    $last_date = '';
     foreach ($messages as $msg) {
         $sender = ($msg->sender_id == $admin_id) ? 'Admin' : $user_info->display_name;
         $time = date('M j, g:i a', strtotime($msg->created_at));
         $clean_msg = wp_strip_all_tags($msg->message);
-        echo "[{$time}] {$sender}:\n{$clean_msg}\n\n";
+        
+        // Add date header if it's a new day
+        $current_date = date('M j, Y', strtotime($msg->created_at));
+        if ($last_date !== $current_date) {
+            echo "\n[" . $current_date . "]\n";
+            $last_date = $current_date;
+        }
+        
+        // Format: [Time] Sender: Message (single line)
+        $formatted_line = '[' . $time . '] ' . $sender . ': ' . $clean_msg;
+        echo wordwrap($formatted_line, 80, "\n    ") . "\n";
     }
     
     exit;

@@ -63,12 +63,6 @@
     box-sizing: border-box;
 }
 
-#auc-send, #auc-admin-send {
-    width: 100%;
-    padding: 10px;
-    margin-top: 5px;
-}
-
 #auc-status {
     text-align: center;
     padding: 5px;
@@ -91,4 +85,13 @@
     height: 20px;
     line-height: 20px;
     font-size: 11px;
+}
+
+#auc-admin-messages .msg + .msg {
+    margin-top: 8px;
+}
+
+.msg-date {
+    margin-top: 15px;
+    margin-bottom: 5px;
 }

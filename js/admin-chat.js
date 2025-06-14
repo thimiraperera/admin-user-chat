@@ -1,4 +1,7 @@
 jQuery(document).ready(function ($) {
+
+    let isInitialLoad = true;
+
     // Configuration variables from PHP
     const ajaxUrl = auc_admin_ajax.ajax_url;
     const nonce = auc_admin_ajax.nonce;
@@ -27,6 +30,10 @@ jQuery(document).ready(function ($) {
             dataType: 'json',
             success: function (data) {
                 if (data && !data.error) {
+                    if (isInitialLoad) {
+                        messagesContainer.empty();
+                        isInitialLoad = false;
+                    }
                     renderAdminMessages(data);
                 }
             },
@@ -34,6 +41,11 @@ jQuery(document).ready(function ($) {
                 console.error('Error fetching messages:', error);
             }
         });
+    }
+
+    if (userId) {
+        fetchAdminMessages(); // Initial load
+        setInterval(fetchAdminMessages, 10000);
     }
     
     // Function to render new messages only (for polling)

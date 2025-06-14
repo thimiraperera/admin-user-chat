@@ -1,4 +1,7 @@
 jQuery(document).ready(function ($) {
+
+    let isInitialLoad = true;
+
     // Configuration variables from PHP
     const ajaxUrl = auc_ajax.ajax_url;
     const nonce = auc_ajax.nonce;
@@ -24,10 +27,14 @@ jQuery(document).ready(function ($) {
             },
             dataType: 'json',
             beforeSend: function() {
-                statusDiv.show();
+                if (isInitialLoad) statusDiv.show();
             },
             success: function (data) {
                 if (data && !data.error) {
+                    if (isInitialLoad) {
+                        messagesDiv.empty();
+                        isInitialLoad = false;
+                    }
                     renderMessages(data);
                 }
             },
