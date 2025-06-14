@@ -165,6 +165,10 @@ function auc_admin_chat_page() {
         $user_id = intval($_GET['user_id']);
         $user_info = get_userdata($user_id);
 
+        // Properly get first and last name from user meta
+        $first_name = get_user_meta($user_id, 'first_name', true);
+        $last_name  = get_user_meta($user_id, 'last_name', true);
+        $user_name  = esc_html(trim($first_name . ' ' . $last_name));
         $user_email = esc_html($user_info->user_email);
 
         // Mark all messages from this user as read
