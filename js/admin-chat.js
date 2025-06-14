@@ -11,7 +11,7 @@ jQuery(document).ready(function ($) {
     const sendButton = $('#auc-admin-send');
     const deleteButton = $('#auc-admin-delete');
     
-    // Function to fetch messages
+    // Function to fetch messages (for polling)
     function fetchAdminMessages() {
         if (!userId) return;
         
@@ -36,13 +36,24 @@ jQuery(document).ready(function ($) {
         });
     }
     
-    // Function to render messages
+    // Function to render new messages only (for polling)
     function renderAdminMessages(messages) {
-        messagesContainer.html('');
-        let lastDate = null;
+        if (messages.length === 0) return;
+        
+        const existingIds = [];
+        messagesContainer.find('.msg').each(function() {
+            existingIds.push($(this).data('id'));
+        });
+        
+        let lastDate = messagesContainer.find('.msg-date').last().text();
+        let addedNew = false;
         
         messages.forEach(msg => {
-            const sender = msg.sender_id == adminId ? 'Admin' : 'User';
+            // Skip if message already exists
+            if (existingIds.includes(msg.id)) return;
+            
+            addedNew = true;
+            const sender = msg.sender_id == adminId ? 'admin' : 'user';
             const msgDate = new Date(msg.created_at);
             const dateStr = msgDate.toLocaleDateString();
             const timeStr = msgDate.toLocaleTimeString([], { 
@@ -56,19 +67,23 @@ jQuery(document).ready(function ($) {
                 lastDate = dateStr;
             }
             
-            // Add message
+            // Add new message
+            const escapedMessage = $('<div>').text(msg.message).html();
+            const formattedMessage = escapedMessage.replace(/\n/g, '<br>');
+            
             messagesContainer.append(`
-                <p>
-                    <strong>${sender}:</strong> 
-                    ${msg.message}
-                    <br>
-                    <small>${timeStr}</small>
-                </p>
+                <div class="msg ${sender}" data-id="${msg.id}">
+                    <strong>${sender === 'admin' ? 'Admin' : 'User'}:</strong> 
+                    ${formattedMessage}
+                    <br><small>${timeStr}</small>
+                </div>
             `);
         });
         
-        // Scroll to bottom
-        messagesContainer.scrollTop(messagesContainer[0].scrollHeight);
+        // Scroll to bottom if new messages were added
+        if (addedNew) {
+            messagesContainer.scrollTop(messagesContainer[0].scrollHeight);
+        }
     }
     
     // Function to send message
@@ -92,7 +107,7 @@ jQuery(document).ready(function ($) {
             success: function (data) {
                 if (data.success) {
                     replyField.val('');
-                    fetchAdminMessages();
+                    fetchAdminMessages(); // Refresh to show new message
                 } else {
                     console.error('Error sending message:', data.error);
                 }
@@ -157,7 +172,8 @@ jQuery(document).ready(function ($) {
         deleteChatHistory();
     });
     
-    // Initial load and polling
-    fetchAdminMessages();
-    setInterval(fetchAdminMessages, 10000); // 10 seconds
+    // Only set up polling if we're in a chat
+    if (userId) {
+        setInterval(fetchAdminMessages, 10000); // 10 seconds
+    }
 });
