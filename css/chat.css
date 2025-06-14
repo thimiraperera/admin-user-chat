@@ -32,3 +32,14 @@
     padding: 10px;
     margin-top: 5px;
 }
+.msg-date {
+    text-align: center;
+    font-weight: bold;
+    margin: 10px 0;
+    color: #888;
+}
+.msg small {
+    display: block;
+    font-size: 0.8em;
+    color: #666;
+}

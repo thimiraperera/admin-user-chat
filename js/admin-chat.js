@@ -10,9 +10,19 @@ jQuery(document).ready(function ($) {
             const container = $('#auc-admin-messages');
             if (container.length) {
                 container.html('');
+                let lastDate = null;
                 data.forEach(msg => {
                     const sender = msg.sender_id == 1 ? 'Admin' : 'User';
-                    container.append(`<p><strong>${sender}:</strong> ${msg.message}</p>`);
+                    const msgDate = new Date(msg.created_at);
+                    const dateStr = msgDate.toLocaleDateString();
+                    const timeStr = msgDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+                    if (lastDate !== dateStr) {
+                        container.append(`<div class="msg-date">${dateStr}</div>`);
+                        lastDate = dateStr;
+                    }
+
+                    container.append(`<p><strong>${sender}:</strong> ${msg.message} <br><small>${timeStr}</small></p>`);
                 });
                 container.scrollTop(container[0].scrollHeight);
             }

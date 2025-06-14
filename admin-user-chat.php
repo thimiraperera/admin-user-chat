@@ -219,6 +219,7 @@ function auc_admin_chat_page() {
             <textarea id="auc-admin-reply" rows="3" cols="50" placeholder="Type your reply..."></textarea><br>
             <button id="auc-admin-send" class="button button-primary">Send Reply</button>
             <button id="auc-admin-delete" class="button button-secondary" style="margin-left: 10px; background: #dc3545; color: white;">Delete Chat History</button>
+            <button id="auc-admin-export" class="button button-secondary" style="margin-left: 10px;">Download Chat</button>
         </div>';
 
         // Optional manual form handler
@@ -311,5 +312,50 @@ function auc_admin_chat_page() {
     });
     </script>";
 
+    echo "<script>
+    jQuery(document).ready(function($) {
+        $('#auc-admin-export').on('click', function () {
+            const userId = " . json_encode(intval($_GET['user_id'] ?? 0)) . ";
+            if (!userId) return;
+
+            window.location.href = ajaxurl + '?action=auc_export_chat&user_id=' + userId;
+        });
+    });
+    </script>";
+
     echo "</div>";
+
+}
+
+add_action('admin_init', 'auc_export_chat');
+function auc_export_chat() {
+    if (!is_admin() || !current_user_can('manage_options')) return;
+    if (!isset($_GET['action']) || $_GET['action'] !== 'auc_export_chat') return;
+
+    global $wpdb;
+    $user_id = intval($_GET['user_id']);
+    if (!$user_id) return;
+
+    $table = $wpdb->prefix . 'auc_messages';
+    $messages = $wpdb->get_results($wpdb->prepare(
+        "SELECT * FROM $table WHERE 
+        (sender_id = %d AND receiver_id = 1) OR 
+        (sender_id = 1 AND receiver_id = %d)
+        ORDER BY created_at ASC", $user_id, $user_id
+    ));
+
+    $user_info = get_userdata($user_id);
+    $filename = 'chat_with_' . $user_info->user_nicename . '.txt';
+
+    header('Content-Type: text/plain');
+    header('Content-Disposition: attachment; filename="' . $filename . '"');
+
+    echo "Chat with {$user_info->display_name} (" . $user_info->user_email . ")\n\n";
+    foreach ($messages as $msg) {
+        $sender = $msg->sender_id == 1 ? 'Admin' : $user_info->display_name;
+        $time = date('Y-m-d H:i', strtotime($msg->created_at));
+        echo "[$time] $sender: " . $msg->message . "\n";
+    }
+    exit;
+
 }
