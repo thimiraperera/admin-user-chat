@@ -2,177 +2,289 @@
 /*
 Plugin Name: Admin User Chat
 Description: Simple chat between admin and logged-in users.
-Version: 1.0
+Version: 1.1
 Author: Thimira Perera
 */
 
+// Helper function to get admin ID
+function auc_get_admin_id() {
+    $admins = get_users([
+        'role' => 'administrator',
+        'number' => 1,
+        'fields' => 'ID'
+    ]);
+    return $admins ? $admins[0] : 1;
+}
+
+// Plugin installation with improved database structure
 register_activation_hook(__FILE__, 'auc_install');
 function auc_install() {
     global $wpdb;
     $table = $wpdb->prefix . 'auc_messages';
     $charset = $wpdb->get_charset_collate();
+    
     $sql = "CREATE TABLE $table (
         id BIGINT AUTO_INCREMENT PRIMARY KEY,
         sender_id BIGINT NOT NULL,
         receiver_id BIGINT NOT NULL,
         message TEXT NOT NULL,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        is_read TINYINT(1) DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        INDEX sender_receiver_idx (sender_id, receiver_id),
+        INDEX created_at_idx (created_at)
     ) $charset;";
+    
     require_once(ABSPATH . 'wp-admin/includes/upgrade.php');
     dbDelta($sql);
+    
+    // Add is_read column if missing (for updates)
+    $columns = $wpdb->get_col("DESC $table", 0);
+    if (!in_array('is_read', $columns)) {
+        $wpdb->query("ALTER TABLE $table ADD COLUMN is_read TINYINT(1) DEFAULT 0");
+    }
 }
 
 // Load assets
 add_action('wp_enqueue_scripts', function () {
-    if (is_user_logged_in()) {
+    if (is_user_logged_in() && !current_user_can('manage_options')) {
         wp_enqueue_style('auc-style', plugin_dir_url(__FILE__) . 'css/chat.css');
         wp_enqueue_script('auc-script', plugin_dir_url(__FILE__) . 'js/chat.js', ['jquery'], null, true);
-        wp_localize_script('auc-script', 'auc_ajax', ['ajax_url' => admin_url('admin-ajax.php')]);
+        
+        wp_localize_script('auc-script', 'auc_ajax', [
+            'ajax_url' => admin_url('admin-ajax.php'),
+            'nonce' => wp_create_nonce('auc_chat_nonce'),
+            'admin_id' => auc_get_admin_id(),
+            'user_id' => get_current_user_id()
+        ]);
     }
 });
 
+// Admin scripts
 add_action('admin_enqueue_scripts', function ($hook) {
     if ($hook !== 'toplevel_page_auc-user-chats') return;
-
+    
+    wp_enqueue_style('auc-admin-style', plugin_dir_url(__FILE__) . 'css/chat.css');
     wp_enqueue_script('auc-admin-chat', plugin_dir_url(__FILE__) . 'js/admin-chat.js', ['jquery'], null, true);
+    
     wp_localize_script('auc-admin-chat', 'auc_admin_ajax', [
         'ajax_url' => admin_url('admin-ajax.php'),
         'user_id' => isset($_GET['user_id']) ? intval($_GET['user_id']) : 0,
+        'nonce' => wp_create_nonce('auc_admin_nonce'),
+        'admin_id' => get_current_user_id()
     ]);
 });
 
 // AJAX Handler for Admin Chat
 add_action('wp_ajax_auc_fetch_admin_messages', 'auc_fetch_admin_messages');
 function auc_fetch_admin_messages() {
+    check_ajax_referer('auc_admin_nonce', 'nonce');
+    
     global $wpdb;
     $user_id = intval($_POST['user_id']);
-    $admin_id = 1; // Optional: Replace with auc_get_admin_id() if dynamic
+    $admin_id = intval($_POST['admin_id']);
     $table = $wpdb->prefix . 'auc_messages';
 
+    // Mark messages as read
+    $wpdb->query($wpdb->prepare(
+        "UPDATE $table SET is_read = 1 
+        WHERE receiver_id = %d AND sender_id = %d",
+        $admin_id, $user_id
+    ));
+
+    // Get messages
     $messages = $wpdb->get_results($wpdb->prepare(
         "SELECT * FROM $table WHERE 
         (sender_id = %d AND receiver_id = %d) OR 
         (sender_id = %d AND receiver_id = %d) 
-        ORDER BY created_at ASC", $user_id, $admin_id, $admin_id, $user_id
+        ORDER BY created_at ASC", 
+        $user_id, $admin_id, $admin_id, $user_id
     ));
+    
     wp_send_json($messages);
 }
 
-
 // Chat box shortcode
 add_shortcode('admin_user_chat', function () {
-    if (!is_user_logged_in()) return 'Please log in to use the chat.';
+    if (!is_user_logged_in()) return '<p>Please log in to use the chat.</p>';
+    if (current_user_can('manage_options')) return '<p>Admins must use the dashboard chat.</p>';
+    
     ob_start(); ?>
     <div id="auc-chat-box">
         <div id="auc-messages"></div>
         <textarea id="auc-input" placeholder="Type your message..."></textarea>
         <button id="auc-send">Send</button>
+        <div id="auc-status" style="display:none; text-align:center;">
+            <img src="<?php echo admin_url('images/spinner.gif'); ?>" alt="Loading...">
+        </div>
     </div>
     <?php return ob_get_clean();
 });
 
-// Handle AJAX fetch messages
+// AJAX fetch messages
 add_action('wp_ajax_auc_fetch_messages', 'auc_fetch_messages');
 function auc_fetch_messages() {
+    check_ajax_referer('auc_chat_nonce', 'nonce');
+    
     global $wpdb;
-    $user_id = get_current_user_id();
-    $admin_id = 1; // Admin user ID
+    $user_id = intval($_POST['user_id']);
+    $admin_id = intval($_POST['admin_id']);
     $table = $wpdb->prefix . 'auc_messages';
+    
     $messages = $wpdb->get_results($wpdb->prepare(
         "SELECT * FROM $table WHERE 
         (sender_id = %d AND receiver_id = %d) OR 
         (sender_id = %d AND receiver_id = %d) 
-        ORDER BY created_at ASC", $user_id, $admin_id, $admin_id, $user_id
+        ORDER BY created_at ASC", 
+        $user_id, $admin_id, $admin_id, $user_id
     ));
+    
     wp_send_json($messages);
 }
 
-// Handle AJAX send message
+// AJAX send message
 add_action('wp_ajax_auc_send_message', 'auc_send_message');
 function auc_send_message() {
+    check_ajax_referer('auc_chat_nonce', 'nonce');
+    
     global $wpdb;
     $sender_id = get_current_user_id();
-    $receiver_id = $sender_id === 1 ? intval($_POST['receiver_id']) : 1;
-    $message = sanitize_text_field($_POST['message']);
+    $message = isset($_POST['message']) ? wp_kses_post(wp_unslash($_POST['message'])) : '';
+    
+    if (empty(trim($message))) {
+        wp_send_json_error('Message cannot be empty');
+    }
+    
+    $admin_id = auc_get_admin_id();
+    $receiver_id = ($sender_id == $admin_id) ? intval($_POST['receiver_id']) : $admin_id;
+    
     $table = $wpdb->prefix . 'auc_messages';
-    $wpdb->insert($table, [
+    $result = $wpdb->insert($table, [
         'sender_id' => $sender_id,
         'receiver_id' => $receiver_id,
         'message' => $message,
     ]);
-    wp_send_json(['success' => true]);
+    
+    if ($result) {
+        wp_send_json_success();
+    } else {
+        wp_send_json_error('Failed to send message');
+    }
 }
 
-// Handle AJAX admin message
+// AJAX admin message
 add_action('wp_ajax_auc_send_admin_message', 'auc_send_admin_message');
 function auc_send_admin_message() {
+    check_ajax_referer('auc_admin_nonce', 'nonce');
+    
+    if (!current_user_can('manage_options')) {
+        wp_send_json_error('Unauthorized', 403);
+    }
+    
     global $wpdb;
-    if (!current_user_can('manage_options')) wp_send_json_error('Unauthorized');
-
-    $sender_id = get_current_user_id(); // admin
+    $sender_id = get_current_user_id();
     $receiver_id = intval($_POST['receiver_id']);
-    $message = sanitize_text_field($_POST['message']);
-
-    $wpdb->insert($wpdb->prefix . 'auc_messages', [
+    $message = isset($_POST['message']) ? wp_kses_post(wp_unslash($_POST['message'])) : '';
+    
+    if (empty(trim($message))) {
+        wp_send_json_error('Message cannot be empty');
+    }
+    
+    $result = $wpdb->insert($wpdb->prefix . 'auc_messages', [
         'sender_id' => $sender_id,
         'receiver_id' => $receiver_id,
         'message' => $message,
     ]);
-
-    wp_send_json_success();
+    
+    if ($result) {
+        wp_send_json_success();
+    } else {
+        wp_send_json_error('Failed to send message');
+    }
 }
 
 // Delete Chat History
 add_action('wp_ajax_auc_delete_chat', 'auc_delete_chat');
 function auc_delete_chat() {
-    if (!current_user_can('manage_options')) wp_send_json_error('Unauthorized');
-
+    check_ajax_referer('auc_admin_nonce', 'nonce');
+    
+    if (!current_user_can('manage_options')) {
+        wp_send_json_error('Unauthorized', 403);
+    }
+    
     global $wpdb;
     $user_id = intval($_POST['user_id']);
     $table = $wpdb->prefix . 'auc_messages';
 
-    $wpdb->query($wpdb->prepare(
+    $result = $wpdb->query($wpdb->prepare(
         "DELETE FROM $table WHERE (sender_id = %d AND receiver_id = 1) OR (sender_id = 1 AND receiver_id = %d)",
         $user_id, $user_id
     ));
-
-    wp_send_json_success();
+    
+    if ($result !== false) {
+        wp_send_json_success();
+    } else {
+        wp_send_json_error('Failed to delete chat history');
+    }
 }
 
-// Add admin menu
+// Admin menu
 add_action('admin_menu', function () {
     add_menu_page('User Chats', 'User Chats', 'manage_options', 'auc-user-chats', 'auc_admin_chat_page', 'dashicons-format-chat', 25);
 });
 
-// Admin chat page content
+// Admin chat page
 function auc_admin_chat_page() {
     global $wpdb;
     $table = $wpdb->prefix . 'auc_messages';
+    $admin_id = get_current_user_id();
 
-    // Get all unique user IDs who messaged admin
+    // Get ALL non-admin users
     $all_users = get_users([
-        'exclude' => [1], // Exclude admin (user ID 1)
+        'role__not_in' => ['administrator'],
         'orderby' => 'display_name',
-        'order' => 'ASC',
+        'order' => 'ASC'
     ]);
-
-    // Prepare array like the previous $users
+    
     $users = [];
-
     foreach ($all_users as $user) {
-        $last_msg_time = $wpdb->get_var($wpdb->prepare(
-            "SELECT MAX(created_at) FROM $table WHERE sender_id = %d OR receiver_id = %d",
-            $user->ID, $user->ID
+        $user_id = $user->ID;
+        
+        // Get last message time
+        $last_msg = $wpdb->get_var($wpdb->prepare(
+            "SELECT MAX(created_at) FROM $table 
+            WHERE (sender_id = %d AND receiver_id = %d)
+            OR (sender_id = %d AND receiver_id = %d)",
+            $user_id, $admin_id, $admin_id, $user_id
         ));
-        $users[] = (object)[
-            'sender_id' => $user->ID,
-            'last_msg_time' => $last_msg_time ?: '',
+        
+        // Get unread message count
+        $unread_count = $wpdb->get_var($wpdb->prepare(
+            "SELECT COUNT(*) FROM $table 
+            WHERE sender_id = %d 
+            AND receiver_id = %d 
+            AND is_read = 0",
+            $user_id, $admin_id
+        ));
+        
+        $users[] = [
+            'ID' => $user_id,
+            'name' => $user->display_name,
+            'email' => $user->user_email,
+            'last_msg' => $last_msg,
+            'unread' => $unread_count ? intval($unread_count) : 0
         ];
     }
-
-    // Sort after loop
+    
+    // Sort by last message time (most recent first)
     usort($users, function ($a, $b) {
-        return strtotime($b->last_msg_time ?: '1970-01-01') - strtotime($a->last_msg_time ?: '1970-01-01');
+        if ($a['last_msg'] && $b['last_msg']) {
+            return strtotime($b['last_msg']) - strtotime($a['last_msg']);
+        }
+        // Put users with messages first
+        if ($a['last_msg'] && !$b['last_msg']) return -1;
+        if (!$a['last_msg'] && $b['last_msg']) return 1;
+        // Then sort by name
+        return strcmp($a['name'], $b['name']);
     });
 
     echo "<div class='wrap'><h1>User Chats</h1>";
@@ -180,182 +292,115 @@ function auc_admin_chat_page() {
     if (isset($_GET['user_id'])) {
         $user_id = intval($_GET['user_id']);
         $user_info = get_userdata($user_id);
-
-        // Properly get first and last name from user meta
-        $first_name = get_user_meta($user_id, 'first_name', true);
-        $last_name  = get_user_meta($user_id, 'last_name', true);
-        $user_name  = esc_html(trim($first_name . ' ' . $last_name));
-        $user_email = esc_html($user_info->user_email);
-
-        // Mark all messages from this user as read
-        $wpdb->update(
-            $table,
-            ['is_read' => 1],
-            ['sender_id' => $user_id, 'receiver_id' => 1]
-        );
-
-        // Fetch chat messages
-        $messages = $wpdb->get_results($wpdb->prepare(
-            "SELECT * FROM $table WHERE 
-            (sender_id = %d AND receiver_id = 1) OR 
-            (sender_id = 1 AND receiver_id = %d) 
-            ORDER BY created_at ASC", $user_id, $user_id
-        ));
-
-        // Header with full name and email
-        echo "<h2 style='margin-bottom: 5px;'>Chat with: <strong>$user_name</strong></h2>";
-        echo "<p>Email: <a href='mailto:$user_email'>$user_email</a></p>";
-
-        // Message display area
-        echo "<div id='auc-admin-messages' style='max-height:300px; overflow:auto; background:#fff; padding:10px; border:1px solid #ccc;'>";
-        foreach ($messages as $msg) {
-            $from = $msg->sender_id == 1 ? 'Admin' : 'User';
-            echo "<p><strong>$from:</strong> " . esc_html($msg->message) . "</p>";
+        
+        if (!$user_info) {
+            echo '<div class="error"><p>User not found</p></div>';
+            return;
         }
-        echo "</div>";
-
-        // Admin reply box
-        echo '<div style="margin-top:15px;">
-            <textarea id="auc-admin-reply" rows="3" cols="50" placeholder="Type your reply..."></textarea><br>
-            <button id="auc-admin-send" class="button button-primary">Send Reply</button>
-            <button id="auc-admin-delete" class="button button-secondary" style="margin-left: 10px; background: #dc3545; color: white;">Delete Chat History</button>
-            <button id="auc-admin-export" class="button button-secondary" style="margin-left: 10px;">Download Chat</button>
+        
+        // Mark messages as read
+        $wpdb->query($wpdb->prepare(
+            "UPDATE $table SET is_read = 1 
+            WHERE receiver_id = %d 
+            AND sender_id = %d",
+            $admin_id, $user_id
+        ));
+        
+        // Display chat header
+        echo "<h2>Chat with: {$user_info->display_name} ({$user_info->user_email})</h2>";
+        echo '<a href="' . admin_url('admin.php?page=auc-user-chats') . '" class="button">← Back to All Users</a>';
+        
+        // Chat container
+        echo '<div id="auc-admin-messages" style="max-height:400px; overflow:auto; margin:20px 0; padding:15px; border:1px solid #ddd; background:#fff;"></div>';
+        
+        // Reply area
+        echo '<div>
+            <textarea id="auc-admin-reply" rows="3" style="width:100%;" placeholder="Type your reply..."></textarea>
+            <button id="auc-admin-send" class="button button-primary">Send</button>
+            <button id="auc-admin-delete" class="button button-secondary" style="background:#dc3545;color:white;">Delete Chat History</button>
+            <button id="auc-admin-export" class="button">Export Chat</button>
         </div>';
-
-        // Optional manual form handler
-        if (isset($_POST['send_reply'])) {
-            $message = sanitize_text_field($_POST['admin_reply']);
-            $wpdb->insert($table, [
-                'sender_id' => 1,
-                'receiver_id' => $user_id,
-                'message' => $message,
-            ]);
-            echo "<div class='updated'><p>Message sent!</p></div>";
-            echo "<script>setTimeout(() => location.reload(), 1000);</script>";
-        }
+        
     } else {
-    
-    echo '<input type="text" id="auc-search" placeholder="Search users by name or email..." style="margin-bottom:10px; padding:5px; width: 300px;">';
-    echo "<table class='widefat'>
-        <thead><tr><th>Name</th><th>Email</th><th>Action</th></tr></thead>
-        <tbody>";
-
-    foreach ($users as $user) {
-        $user_id = $user->sender_id;
-        $user_info = get_userdata($user_id);
-
-        // Count unread messages from this user
-        $unread_count = $wpdb->get_var($wpdb->prepare(
-            "SELECT COUNT(*) FROM $table WHERE sender_id = %d AND receiver_id = 1 AND is_read = 0",
-            $user_id
-        ));
-
-        if ($user_info) {
-            $first_name = get_user_meta($user_id, 'first_name', true);
-            $last_name = get_user_meta($user_id, 'last_name', true);
-            $name = esc_html(trim("$first_name $last_name")) ?: esc_html($user_info->display_name);
-            $email = esc_html($user_info->user_email);
-
-            $email_link = "<a href='mailto:$email'>$email</a>";
-            $copy_button = "<button class='button button-small auc-copy-btn' data-email='$email'>Copy</button>";
-
-            $badge = $unread_count > 0 ? "<span style='color:red;'>($unread_count new)</span>" : "";
+        // User list
+        echo '<input type="text" id="auc-search" placeholder="Search users..." style="margin-bottom:20px; padding:8px; width:300px;">';
+        echo '<table class="wp-list-table widefat fixed striped">';
+        echo '<thead><tr><th>User</th><th>Last Activity</th><th>Unread</th><th>Actions</th></tr></thead><tbody>';
+        
+        foreach ($users as $user) {
+            $unread_badge = $user['unread'] ? '<span class="update-plugins"><span class="update-count">' . $user['unread'] . '</span></span>' : '';
+            $last_msg = $user['last_msg'] ? date('M j, Y g:i a', strtotime($user['last_msg'])) : 'No messages';
             
             echo "<tr>
-                    <td>$name $badge</td>
-                    <td>$email_link $copy_button</td>
-                    <td><a class='button' href='?page=auc-user-chats&user_id={$user_id}'>Open Chat</a></td>
-                </tr>";
+                <td><strong>{$user['name']}</strong><br>{$user['email']}</td>
+                <td>{$last_msg}</td>
+                <td>{$unread_badge}</td>
+                <td>
+                    <a class='button' href='" . admin_url("admin.php?page=auc-user-chats&user_id={$user['ID']}") . "'>Open Chat</a>
+                    <a class='button' href='" . admin_url("admin-ajax.php?action=auc_export_chat&user_id={$user['ID']}&nonce=" . wp_create_nonce('export_chat_' . $user['ID'])) . "'>Export</a>
+                </td>
+            </tr>";
         }
+        
+        echo '</tbody></table>';
     }
 
-    echo "</tbody></table>";
-    }
-
-    // Add copy-to-clipboard functionality
+    // JavaScript functionality
     echo "<script>
     jQuery(document).ready(function($) {
-        // Copy button
-        $('.auc-copy-btn').on('click', function() {
-            const email = $(this).data('email');
-            navigator.clipboard.writeText(email);
-        });
-
-        // Live Search Filter
+        // User search
         $('#auc-search').on('keyup', function() {
-            const value = $(this).val().toLowerCase();
-            $('.widefat tbody tr').each(function() {
-                const rowText = $(this).text().toLowerCase();
-                $(this).toggle(rowText.indexOf(value) > -1);
+            const search = $(this).val().toLowerCase();
+            $('tbody tr').each(function() {
+                const text = $(this).text().toLowerCase();
+                $(this).toggle(text.indexOf(search) > -1);
             });
         });
     });
     </script>";
-
-    echo "<script>
-    jQuery(document).ready(function($) {
-        $('#auc-admin-delete').on('click', function () {
-            if (!confirm('Are you sure you want to delete this entire chat history?')) return;
-
-            $.post(ajaxurl, {
-                action: 'auc_delete_chat',
-                user_id: " . (isset($_GET['user_id']) ? intval($_GET['user_id']) : 0) . "
-            }, function (response) {
-                if (response.success) {
-                    alert('Chat history deleted!');
-                    location.reload();
-                } else {
-                    alert('Error deleting chat history.');
-                }
-            });
-        });
-    });
-    </script>";
-
-    echo "<script>
-    jQuery(document).ready(function($) {
-        $('#auc-admin-export').on('click', function () {
-            const userId = " . json_encode(intval($_GET['user_id'] ?? 0)) . ";
-            if (!userId) return;
-
-            window.location.href = ajaxurl + '?action=auc_export_chat&user_id=' + userId;
-        });
-    });
-    </script>";
-
-    echo "</div>";
-
+    
+    echo "</div>"; // .wrap
 }
 
+// Chat export
 add_action('admin_init', 'auc_export_chat');
 function auc_export_chat() {
-    if (!is_admin() || !current_user_can('manage_options')) return;
     if (!isset($_GET['action']) || $_GET['action'] !== 'auc_export_chat') return;
-
+    
+    check_admin_referer('export_chat_' . $_GET['user_id'], 'nonce');
+    
+    if (!current_user_can('manage_options')) {
+        wp_die('Unauthorized', 403);
+    }
+    
     global $wpdb;
     $user_id = intval($_GET['user_id']);
-    if (!$user_id) return;
-
+    $admin_id = auc_get_admin_id();
     $table = $wpdb->prefix . 'auc_messages';
+    
     $messages = $wpdb->get_results($wpdb->prepare(
         "SELECT * FROM $table WHERE 
-        (sender_id = %d AND receiver_id = 1) OR 
-        (sender_id = 1 AND receiver_id = %d)
-        ORDER BY created_at ASC", $user_id, $user_id
+        (sender_id = %d AND receiver_id = %d) OR 
+        (sender_id = %d AND receiver_id = %d)
+        ORDER BY created_at ASC", 
+        $user_id, $admin_id, $admin_id, $user_id
     ));
-
+    
     $user_info = get_userdata($user_id);
-    $filename = 'chat_with_' . $user_info->user_nicename . '.txt';
-
+    $filename = 'chat-export-' . sanitize_title($user_info->display_name) . '-' . date('Y-m-d') . '.txt';
+    
     header('Content-Type: text/plain');
     header('Content-Disposition: attachment; filename="' . $filename . '"');
-
-    echo "Chat with {$user_info->display_name} (" . $user_info->user_email . ")\n\n";
+    
+    echo "Chat History with {$user_info->display_name} ({$user_info->user_email})\n";
+    echo "Exported on: " . date('F j, Y \a\t g:i a') . "\n\n";
+    echo str_repeat('=', 50) . "\n\n";
+    
     foreach ($messages as $msg) {
-        $sender = $msg->sender_id == 1 ? 'Admin' : $user_info->display_name;
-        $time = date('Y-m-d H:i', strtotime($msg->created_at));
-        echo "[$time] $sender: " . $msg->message . "\n";
+        $sender = ($msg->sender_id == $admin_id) ? 'Admin' : $user_info->display_name;
+        $time = date('M j, g:i a', strtotime($msg->created_at));
+        echo "[{$time}] {$sender}:\n{$msg->message}\n\n";
     }
+    
     exit;
-
 }

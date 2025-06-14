@@ -1,49 +1,128 @@
 jQuery(document).ready(function ($) {
+    // Configuration variables from PHP
+    const ajaxUrl = auc_ajax.ajax_url;
+    const nonce = auc_ajax.nonce;
+    const userId = auc_ajax.user_id;
+    const adminId = auc_ajax.admin_id;
+    
+    // DOM elements
+    const messagesDiv = $('#auc-messages');
+    const inputField = $('#auc-input');
+    const sendButton = $('#auc-send');
+    const statusDiv = $('#auc-status');
+    
+    // Function to fetch messages
     function fetchMessages() {
-        $.post(auc_ajax.ajax_url, { action: 'auc_fetch_messages' }, function (data) {
-            const messagesDiv = $('#auc-messages');
-            messagesDiv.html('');
-			let lastDate = null;
-			data.forEach(msg => {
-				const cls = msg.sender_id == 1 ? 'admin' : 'user';
-				const msgDate = new Date(msg.created_at);
-				const dateStr = msgDate.toLocaleDateString();
-				const timeStr = msgDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-
-				if (lastDate !== dateStr) {
-					messagesDiv.append(`<div class="msg-date">${dateStr}</div>`);
-					lastDate = dateStr;
-				}
-
-				messagesDiv.append(`<div class="msg ${cls}">${msg.message}<br><small>${timeStr}</small></div>`);
-			});
-            messagesDiv.scrollTop(messagesDiv[0].scrollHeight);
+        $.ajax({
+            url: ajaxUrl,
+            method: 'POST',
+            data: {
+                action: 'auc_fetch_messages',
+                user_id: userId,
+                admin_id: adminId,
+                nonce: nonce
+            },
+            dataType: 'json',
+            beforeSend: function() {
+                statusDiv.show();
+            },
+            success: function (data) {
+                if (data && !data.error) {
+                    renderMessages(data);
+                }
+            },
+            error: function (xhr, status, error) {
+                console.error('Error fetching messages:', error);
+            },
+            complete: function() {
+                statusDiv.hide();
+            }
         });
     }
-
-	function sendMessage() {
-		const msg = $('#auc-input').val();
-		if (!msg.trim()) return;
-		$.post(auc_ajax.ajax_url, {
-			action: 'auc_send_message',
-			message: msg
-		}, function () {
-			$('#auc-input').val('');
-			fetchMessages();
-		});
-	}
-
-	$('#auc-send').on('click', function () {
-		sendMessage();
-	});
-
-	$('#auc-input').on('keydown', function (e) {
-		if (e.key === 'Enter' && !e.shiftKey) {
-			e.preventDefault();
-			sendMessage();
-		}
-	});
-
+    
+    // Function to render messages
+    function renderMessages(messages) {
+        messagesDiv.html('');
+        let lastDate = null;
+        
+        messages.forEach(msg => {
+            const cls = msg.sender_id == adminId ? 'admin' : 'user';
+            const msgDate = new Date(msg.created_at);
+            const dateStr = msgDate.toLocaleDateString();
+            const timeStr = msgDate.toLocaleTimeString([], { 
+                hour: '2-digit', 
+                minute: '2-digit' 
+            });
+            
+            // Add date separator if needed
+            if (lastDate !== dateStr) {
+                messagesDiv.append(`<div class="msg-date">${dateStr}</div>`);
+                lastDate = dateStr;
+            }
+            
+            // Add message
+            messagesDiv.append(`
+                <div class="msg ${cls}">
+                    ${msg.message}
+                    <br>
+                    <small>${timeStr}</small>
+                </div>
+            `);
+        });
+        
+        // Scroll to bottom
+        messagesDiv.scrollTop(messagesDiv[0].scrollHeight);
+    }
+    
+    // Function to send message
+    function sendMessage() {
+        const message = inputField.val().trim();
+        if (!message) return;
+        
+        $.ajax({
+            url: ajaxUrl,
+            method: 'POST',
+            data: {
+                action: 'auc_send_message',
+                message: message,
+                nonce: nonce
+            },
+            dataType: 'json',
+            beforeSend: function() {
+                sendButton.prop('disabled', true);
+                statusDiv.show();
+            },
+            success: function (data) {
+                if (data.success) {
+                    inputField.val('');
+                    fetchMessages();
+                } else {
+                    console.error('Error sending message:', data.error);
+                }
+            },
+            error: function (xhr, status, error) {
+                console.error('AJAX error:', error);
+            },
+            complete: function() {
+                sendButton.prop('disabled', false);
+                statusDiv.hide();
+            }
+        });
+    }
+    
+    // Event handlers
+    sendButton.on('click', function () {
+        sendMessage();
+    });
+    
+    inputField.on('keydown', function (e) {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            sendMessage();
+        }
+    });
+    
+    // Initial load and polling
     fetchMessages();
-    setInterval(fetchMessages, 2000);
+    setInterval(fetchMessages, 10000); // 10 seconds
 });
