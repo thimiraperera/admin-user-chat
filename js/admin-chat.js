@@ -49,5 +49,5 @@ jQuery(document).ready(function ($) {
 	});
 
     fetchAdminMessages();
-    setInterval(fetchAdminMessages, 3000);
+    setInterval(fetchAdminMessages, 2000);
 });

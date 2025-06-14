@@ -216,6 +216,8 @@ function auc_admin_chat_page() {
             echo "<script>setTimeout(() => location.reload(), 1000);</script>";
         }
     } else {
+    
+    echo '<input type="text" id="auc-search" placeholder="Search users by name or email..." style="margin-bottom:10px; padding:5px; width: 300px;">';
     echo "<table class='widefat'>
         <thead><tr><th>Name</th><th>Email</th><th>Action</th></tr></thead>
         <tbody>";
@@ -231,14 +233,16 @@ function auc_admin_chat_page() {
         ));
 
         if ($user_info) {
-            $name = esc_html($user_info->display_name);
+            $first_name = get_user_meta($user_id, 'first_name', true);
+            $last_name = get_user_meta($user_id, 'last_name', true);
+            $name = esc_html(trim("$first_name $last_name")) ?: esc_html($user_info->display_name);
             $email = esc_html($user_info->user_email);
 
             $email_link = "<a href='mailto:$email'>$email</a>";
             $copy_button = "<button class='button button-small auc-copy-btn' data-email='$email'>Copy</button>";
 
             $badge = $unread_count > 0 ? "<span style='color:red;'>($unread_count new)</span>" : "";
-
+            
             echo "<tr>
                     <td>$name $badge</td>
                     <td>$email_link $copy_button</td>
@@ -253,14 +257,23 @@ function auc_admin_chat_page() {
     // Add copy-to-clipboard functionality
     echo "<script>
     jQuery(document).ready(function($) {
+        // Copy button
         $('.auc-copy-btn').on('click', function() {
             const email = $(this).data('email');
-            navigator.clipboard.writeText(email).then(function() {
-                // no message shown after copy
+            navigator.clipboard.writeText(email);
+        });
+
+        // Live Search Filter
+        $('#auc-search').on('keyup', function() {
+            const value = $(this).val().toLowerCase();
+            $('.widefat tbody tr').each(function() {
+                const rowText = $(this).text().toLowerCase();
+                $(this).toggle(rowText.indexOf(value) > -1);
             });
         });
     });
     </script>";
+
 
     echo "</div>";
 }
