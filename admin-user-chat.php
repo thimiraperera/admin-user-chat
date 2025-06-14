@@ -134,13 +134,30 @@ function auc_admin_chat_page() {
     $table = $wpdb->prefix . 'auc_messages';
 
     // Get all unique user IDs who messaged admin
-    $users = $wpdb->get_results("
-        SELECT sender_id, MAX(created_at) as last_msg_time 
-        FROM $table 
-        WHERE receiver_id = 1 AND sender_id != 1 
-        GROUP BY sender_id 
-        ORDER BY last_msg_time DESC
-    ");
+    $all_users = get_users([
+        'exclude' => [1], // Exclude admin (user ID 1)
+        'orderby' => 'display_name',
+        'order' => 'ASC',
+    ]);
+
+    // Prepare array like the previous $users
+    $users = [];
+
+    foreach ($all_users as $user) {
+        $last_msg_time = $wpdb->get_var($wpdb->prepare(
+            "SELECT MAX(created_at) FROM $table WHERE sender_id = %d OR receiver_id = %d",
+            $user->ID, $user->ID
+        ));
+        $users[] = (object)[
+            'sender_id' => $user->ID,
+            'last_msg_time' => $last_msg_time ?: '',
+        ];
+    }
+
+    // Sort after loop
+    usort($users, function ($a, $b) {
+        return strtotime($b->last_msg_time ?: '1970-01-01') - strtotime($a->last_msg_time ?: '1970-01-01');
+    });
 
     echo "<div class='wrap'><h1>User Chats</h1>";
 
