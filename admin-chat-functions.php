@@ -39,10 +39,22 @@ function auc_chat_settings_page() {
     if (isset($_POST['auc_admin_email'])) {
         $email = sanitize_email($_POST['auc_admin_email']);
         update_option('auc_admin_notification_email', $email);
-        echo '<div class="notice notice-success"><p>Settings saved.</p></div>';
+        echo '<div class="notice notice-success"><p>Notification email saved.</p></div>';
+    }
+    
+    // Save notification interval
+    if (isset($_POST['auc_notification_interval'])) {
+        $interval = intval($_POST['auc_notification_interval']);
+        if ($interval >= 1 && $interval <= 1440) {
+            update_option('auc_notification_interval', $interval);
+            echo '<div class="notice notice-success"><p>Notification interval saved.</p></div>';
+        } else {
+            echo '<div class="notice notice-error"><p>Interval must be between 1-1440 minutes.</p></div>';
+        }
     }
 
     $current_email = get_option('auc_admin_notification_email', '');
+    $current_interval = get_option('auc_notification_interval', 1);
 
     ?>
     <div class="wrap">
@@ -54,12 +66,42 @@ function auc_chat_settings_page() {
                     <td>
                         <input type="email" name="auc_admin_email" id="auc_admin_email" 
                                value="<?php echo esc_attr($current_email); ?>" class="regular-text">
-                        <p class="description">Email to receive notifications when admin doesn't reply within 1 minute</p>
+                        <p class="description">Email to receive notifications for unread messages</p>
+                    </td>
+                </tr>
+                <tr>
+                    <th scope="row"><label for="auc_notification_interval">Notification Interval (minutes)</label></th>
+                    <td>
+                        <input type="number" name="auc_notification_interval" id="auc_notification_interval" 
+                               value="<?php echo esc_attr($current_interval); ?>" min="1" max="1440" class="small-text">
+                        <p class="description">How often to send notifications (1-1440 minutes, 1440 = 24 hours)</p>
                     </td>
                 </tr>
             </table>
             <?php submit_button('Save Settings'); ?>
         </form>
+        
+        <h3>Email Format:</h3>
+        <p>Notifications will be sent as a single email listing all users with unread messages.</p>
+        <p>Each user will be shown with their name and email address.</p>
+        <p>Example:</p>
+        <div style="background: #f9f9f9; padding: 15px; border: 1px solid #ddd; max-width: 600px;">
+            <h4 style="margin-top:0;">Users with Unread Messages</h4>
+            <ul style="list-style: none; padding-left: 0;">
+                <li style="padding: 8px 0; border-bottom: 1px solid #eee;">
+                    <strong>John Doe</strong>
+                    <div>john@example.com</div>
+                </li>
+                <li style="padding: 8px 0; border-bottom: 1px solid #eee;">
+                    <strong>Jane Smith</strong>
+                    <div>jane@example.com</div>
+                </li>
+            </ul>
+            <p style="font-size: 0.9em; color: #666; margin-top: 15px;">
+                Notification interval: 5 minutes<br>
+                This email was sent automatically from your website chat system.
+            </p>
+        </div>
     </div>
     <?php
 }

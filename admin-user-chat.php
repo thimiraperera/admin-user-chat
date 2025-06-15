@@ -2,7 +2,7 @@
 /*
 Plugin Name: Admin User Chat
 Description: Simple chat between admin and logged-in users with email notifications.
-Version: 1.6
+Version: 2.2
 Author: Thimira Perera
 */
 
@@ -47,6 +47,45 @@ function auc_install() {
     // Add option for notification email
     if (!get_option('auc_admin_notification_email')) {
         update_option('auc_admin_notification_email', get_option('admin_email'));
+    }
+    
+    // Add option for notification interval
+    if (!get_option('auc_notification_interval')) {
+        update_option('auc_notification_interval', 1); // Default to 1 minute
+    }
+    
+    // Schedule notification cron
+    if (!wp_next_scheduled('auc_notification_cron')) {
+        wp_schedule_event(time(), 'auc_notification_interval', 'auc_notification_cron');
+    }
+}
+
+// Deactivation hook to clean up cron
+register_deactivation_hook(__FILE__, 'auc_deactivate');
+function auc_deactivate() {
+    wp_clear_scheduled_hook('auc_notification_cron');
+}
+
+// Custom cron schedule
+add_filter('cron_schedules', 'auc_custom_cron_schedule');
+function auc_custom_cron_schedule($schedules) {
+    $interval = get_option('auc_notification_interval', 1);
+    
+    $schedules['auc_notification_interval'] = [
+        'interval' => $interval * 60, // Convert minutes to seconds
+        'display'  => sprintf(__('Every %d minutes'), $interval)
+    ];
+    
+    return $schedules;
+}
+
+// Setup cron on settings change
+add_action('update_option_auc_notification_interval', 'auc_reschedule_cron', 10, 2);
+function auc_reschedule_cron($old_value, $new_value) {
+    wp_clear_scheduled_hook('auc_notification_cron');
+    
+    if ($new_value > 0) {
+        wp_schedule_event(time(), 'auc_notification_interval', 'auc_notification_cron');
     }
 }
 
@@ -178,12 +217,6 @@ function auc_send_message() {
     ]);
     
     if ($result) {
-        // Schedule notification check only for user messages
-        if ($sender_id != $admin_id) {
-            $message_id = $wpdb->insert_id;
-            wp_schedule_single_event(time() + 60, 'auc_send_notification', [$message_id]);
-        }
-        
         wp_send_json_success();
     } else {
         wp_send_json_error('Failed to send message');
@@ -252,49 +285,94 @@ function auc_delete_chat() {
     }
 }
 
-// Email notification system
-add_action('auc_send_notification', 'auc_maybe_send_notification');
-function auc_maybe_send_notification($message_id) {
+// Notification cron handler - SINGLE EMAIL WITH ALL USERS
+add_action('auc_notification_cron', 'auc_process_notifications');
+function auc_process_notifications() {
     global $wpdb;
     $table = $wpdb->prefix . 'auc_messages';
     $admin_id = auc_get_admin_id();
-    
-    // Get the original message
-    $message = $wpdb->get_row($wpdb->prepare(
-        "SELECT * FROM $table WHERE id = %d", $message_id
-    ));
-    
-    // If message doesn't exist, do nothing
-    if (!$message) return;
-    
-    // Check if admin has already replied
-    $has_reply = $wpdb->get_var($wpdb->prepare(
-        "SELECT COUNT(*) FROM $table 
-        WHERE sender_id = %d 
-        AND receiver_id = %d 
-        AND id > %d",
-        $admin_id, $message->sender_id, $message_id
-    ));
-    
-    // If admin replied, no need to send notification
-    if ($has_reply) return;
-    
-    // Get admin email from settings
     $admin_email = get_option('auc_admin_notification_email');
+    
     if (!$admin_email) return;
     
-    // Get user info
-    $user = get_userdata($message->sender_id);
+    // Get all users with unread messages
+    $users = $wpdb->get_results(
+        "SELECT sender_id 
+        FROM $table 
+        WHERE receiver_id = $admin_id 
+        AND is_read = 0 
+        GROUP BY sender_id"
+    );
+    
+    if (empty($users)) return;
+    
+    // Collect user data
+    $user_list = [];
+    foreach ($users as $user) {
+        $user_id = $user->sender_id;
+        $user_info = get_userdata($user_id);
+        
+        if ($user_info) {
+            $user_list[] = [
+                'name' => $user_info->display_name,
+                'email' => $user_info->user_email
+            ];
+        }
+    }
+    
+    // Send single email with all users
+    auc_send_user_list_notification($user_list);
+}
+
+// Send user list notification
+function auc_send_user_list_notification($users) {
+    $admin_email = get_option('auc_admin_notification_email');
+    $interval = get_option('auc_notification_interval', 1);
+    
+    if (!$admin_email || empty($users)) return;
     
     // Prepare email content
-    $to = $admin_email;
-    $subject = 'New Chat Message Requires Attention';
-    $message_text = "Hello,\n\n";
-    $message_text .= "You have a new chat message that hasn't been replied to:\n\n";
-    $message_text .= "User: {$user->display_name} ({$user->user_email})\n";
-    $message_text .= "Message: {$message->message}\n\n";
-    $message_text .= "Please respond at: " . admin_url('admin.php?page=auc-user-chats&user_id=' . $user->ID);
+    $subject = 'Users with Unread Messages (' . count($users) . ')';
+    
+    // Build HTML content
+    $html_message = '<!DOCTYPE html>
+    <html>
+    <head>
+        <title>Unread Messages Notification</title>
+        <style>
+            body { font-family: Arial, sans-serif; line-height: 1.6; }
+            h2 { color: #0073aa; }
+            ul { list-style-type: none; padding: 0; }
+            li { padding: 8px 0; border-bottom: 1px solid #eee; }
+            .count { font-weight: bold; margin-bottom: 15px; }
+            .footer { font-size: 0.9em; color: #666; margin-top: 20px; }
+        </style>
+    </head>
+    <body>
+        <h2>Users with Unread Messages</h2>
+        <div class="count">Total users: ' . count($users) . '</div>
+        <ul>';
+    
+    foreach ($users as $user) {
+        $html_message .= '
+            <li>
+                <strong>' . esc_html($user['name']) . '</strong>
+                <div>' . esc_html($user['email']) . '</div>
+            </li>';
+    }
+    
+    $html_message .= '
+        </ul>
+        <div class="footer">
+            Notification interval: ' . $interval . ' minutes<br>
+            This email was sent automatically from your website chat system.
+        </div>
+    </body>
+    </html>';
+    
+    // Headers for HTML email
+    $headers = array('Content-Type: text/html; charset=UTF-8');
     
     // Send email
-    wp_mail($to, $subject, $message_text);
+    wp_mail($admin_email, $subject, $html_message, $headers);
 }
