@@ -2,7 +2,7 @@
 /*
 Plugin Name: Admin User Chat
 Description: Simple chat between admin and logged-in users.
-Version: 1.3
+Version: 1.4
 Author: Thimira Perera
 */
 
@@ -114,8 +114,8 @@ function auc_fetch_admin_messages() {
     wp_send_json($messages);
 }
 
-// Chat box shortcode
-add_shortcode('admin_user_chat', function () {
+// FIXED SHORTCODE: Changed from admin_user_chat to user_chat
+add_shortcode('user_chat', function () {
     if (!is_user_logged_in()) return '<p>Please log in to use the chat.</p>';
     if (current_user_can('manage_options')) return '<p>Admins must use the dashboard chat.</p>';
     
@@ -154,7 +154,7 @@ function auc_fetch_messages() {
     wp_send_json($messages);
 }
 
-// AJAX send message
+// AJAX send message (ADDED LENGTH VALIDATION)
 add_action('wp_ajax_auc_send_message', 'auc_send_message');
 function auc_send_message() {
     check_ajax_referer('auc_chat_nonce', 'nonce');
@@ -163,8 +163,13 @@ function auc_send_message() {
     $sender_id = get_current_user_id();
     $message = isset($_POST['message']) ? wp_kses_post(wp_unslash($_POST['message'])) : '';
     
+    // Validate message length
     if (empty(trim($message))) {
         wp_send_json_error('Message cannot be empty');
+    }
+    
+    if (strlen($message) > 500) {
+        wp_send_json_error('Message too long (max 500 characters)');
     }
     
     $admin_id = auc_get_admin_id();
@@ -184,7 +189,7 @@ function auc_send_message() {
     }
 }
 
-// AJAX admin message
+// AJAX admin message (ADDED LENGTH VALIDATION)
 add_action('wp_ajax_auc_send_admin_message', 'auc_send_admin_message');
 function auc_send_admin_message() {
     check_ajax_referer('auc_admin_nonce', 'nonce');
@@ -198,8 +203,13 @@ function auc_send_admin_message() {
     $receiver_id = intval($_POST['receiver_id']);
     $message = isset($_POST['message']) ? wp_kses_post(wp_unslash($_POST['message'])) : '';
     
+    // Validate message length
     if (empty(trim($message))) {
         wp_send_json_error('Message cannot be empty');
+    }
+    
+    if (strlen($message) > 500) {
+        wp_send_json_error('Message too long (max 500 characters)');
     }
     
     $result = $wpdb->insert($wpdb->prefix . 'auc_messages', [
@@ -337,8 +347,8 @@ function auc_admin_chat_page() {
         ));
         
         // Display chat header
-        echo "<h2>Chat with: {$user_info->display_name} ({$user_info->user_email})</h2>";
-        echo '<a href="' . admin_url('admin.php?page=auc-user-chats') . '" class="button">← Back to All Users</a>';
+        echo "<h2>Chat with: " . esc_html($user_info->display_name) . " (" . esc_html($user_info->user_email) . ")</h2>";
+        echo '<a href="' . esc_url(admin_url('admin.php?page=auc-user-chats')) . '" class="button">← Back to All Users</a>';
         
         // Chat container with preloaded messages
         echo '<div id="auc-admin-messages" style="max-height:400px; overflow:auto; margin:20px 0; padding:15px;">';
@@ -363,7 +373,6 @@ function auc_admin_chat_page() {
                 // Preserve line breaks
                 $escaped_message = nl2br($escaped_message);
                 
-                // echo '<div class="msg ' . esc_attr($sender) . '">';
                 echo '<div class="msg ' . esc_attr($sender) . '" data-id="' . esc_attr($msg->id) . '">';
                 echo '<strong>' . ($sender == 'admin' ? 'Admin' : 'User') . ':</strong> ';
                 echo $escaped_message;
@@ -378,7 +387,7 @@ function auc_admin_chat_page() {
             <textarea id="auc-admin-reply" rows="3" style="width:100%;" placeholder="Type your reply..."></textarea>
             <button id="auc-admin-send" class="button button-primary">Send</button>
             <button id="auc-admin-delete" class="button button-secondary">Delete Chat History</button>
-            <a href="' . admin_url('admin-ajax.php?action=auc_export_chat&user_id=' . $user_id . '&nonce=' . wp_create_nonce('export_chat_' . $user_id)) . '" class="button">Export Chat</a>
+            <a href="' . esc_url(admin_url('admin-ajax.php?action=auc_export_chat&user_id=' . $user_id . '&nonce=' . wp_create_nonce('export_chat_' . $user_id))) . '" class="button">Export Chat</a>
         </div>';
         
     } else {
@@ -399,8 +408,8 @@ function auc_admin_chat_page() {
                     <td>" . esc_html($last_msg) . "</td>
                     <td>" . $unread_badge . "</td>
                     <td>
-                        <a class='button' href='" . admin_url("admin.php?page=auc-user-chats&user_id={$user['ID']}") . "'>Open Chat</a>
-                        <a class='button' href='" . admin_url("admin-ajax.php?action=auc_export_chat&user_id={$user['ID']}&nonce=" . wp_create_nonce('export_chat_' . $user['ID'])) . "'>Export</a>
+                        <a class='button' href='" . esc_url(admin_url("admin.php?page=auc-user-chats&user_id={$user['ID']}")) . "'>Open Chat</a>
+                        <a class='button' href='" . esc_url(admin_url("admin-ajax.php?action=auc_export_chat&user_id={$user['ID']}&nonce=" . wp_create_nonce('export_chat_' . $user['ID']))) . "'>Export</a>
                     </td>
                 </tr>";
             }
@@ -426,7 +435,7 @@ function auc_admin_chat_page() {
     echo "</div>"; // .wrap
 }
 
-// Chat export
+// Chat export (ADDED OUTPUT ESCAPING)
 add_action('admin_init', 'auc_export_chat');
 function auc_export_chat() {
     if (!isset($_GET['action']) || $_GET['action'] !== 'auc_export_chat') return;
@@ -456,8 +465,9 @@ function auc_export_chat() {
     header('Content-Type: text/plain');
     header('Content-Disposition: attachment; filename="' . $filename . '"');
     
-    echo "Chat History with {$user_info->display_name} ({$user_info->user_email})\n";
-    echo "Exported on: " . date('F j, Y \a\t g:i a') . "\n\n";
+    // SECURITY FIX: Use esc_html for output
+    echo esc_html("Chat History with {$user_info->display_name} ({$user_info->user_email})") . "\n";
+    echo esc_html("Exported on: " . date('F j, Y \a\t g:i a')) . "\n\n";
     
     $last_date = '';
     foreach ($messages as $msg) {
@@ -468,12 +478,12 @@ function auc_export_chat() {
         // Add date header if it's a new day
         $current_date = date('M j, Y', strtotime($msg->created_at));
         if ($last_date !== $current_date) {
-            echo "\n[" . $current_date . "]\n";
+            echo "\n[" . esc_html($current_date) . "]\n";
             $last_date = $current_date;
         }
         
         // Format: [Time] Sender: Message (single line)
-        $formatted_line = '[' . $time . '] ' . $sender . ': ' . $clean_msg;
+        $formatted_line = '[' . esc_html($time) . '] ' . esc_html($sender) . ': ' . esc_html($clean_msg);
         echo wordwrap($formatted_line, 80, "\n    ") . "\n";
     }
     

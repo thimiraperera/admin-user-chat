@@ -1,5 +1,6 @@
 jQuery(document).ready(function ($) {
     // Configuration
+    const MAX_MESSAGE_LENGTH = 500;
     const ajaxUrl = auc_admin_ajax.ajax_url;
     const nonce = auc_admin_ajax.nonce;
     const userId = auc_admin_ajax.user_id;
@@ -81,10 +82,20 @@ jQuery(document).ready(function ($) {
         container.scrollTop(container[0].scrollHeight);
     }
     
-    // Send message function (unchanged)
+    // Send message function (ADDED LENGTH CHECK)
     function sendAdminMessage() {
         const message = replyField.val().trim();
-        if (!message) return;
+        
+        // Validate message
+        if (!message) {
+            alert("Please enter a message");
+            return;
+        }
+        
+        if (message.length > MAX_MESSAGE_LENGTH) {
+            alert(`Message too long (max ${MAX_MESSAGE_LENGTH} characters)`);
+            return;
+        }
         
         $.ajax({
             url: ajaxUrl,
@@ -114,7 +125,7 @@ jQuery(document).ready(function ($) {
         }
     });
     
-    // Delete function (unchanged)
+    // Delete function
     function deleteChatHistory() {
         if (!confirm('Delete entire chat history?')) return;
         

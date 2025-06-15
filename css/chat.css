@@ -95,3 +95,29 @@
     margin-top: 15px;
     margin-bottom: 5px;
 }
+
+/* MOBILE RESPONSIVENESS */
+@media (max-width: 600px) {
+    #auc-chat-box {
+        max-width: 100%;
+        padding: 8px;
+    }
+    
+    #auc-messages, #auc-admin-messages {
+        max-height: 250px;
+    }
+    
+    #auc-input, #auc-admin-reply {
+        height: 50px;
+        font-size: 14px;
+    }
+    
+    .msg {
+        padding: 6px;
+        font-size: 14px;
+    }
+    
+    .msg small {
+        font-size: 0.7em;
+    }
+}

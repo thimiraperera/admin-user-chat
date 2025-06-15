@@ -1,6 +1,6 @@
 jQuery(document).ready(function ($) {
-
     let isInitialLoad = true;
+    const MAX_MESSAGE_LENGTH = 500;
 
     // Configuration variables from PHP
     const ajaxUrl = auc_ajax.ajax_url;
@@ -47,7 +47,7 @@ jQuery(document).ready(function ($) {
         });
     }
     
-    // Function to render messages
+    // Function to render messages (FIXED XSS VULNERABILITY)
     function renderMessages(messages) {
         messagesDiv.html('');
         let lastDate = null;
@@ -67,10 +67,13 @@ jQuery(document).ready(function ($) {
                 lastDate = dateStr;
             }
             
+            // SECURITY FIX: Escape HTML before displaying
+            const escapedMsg = $('<div>').text(msg.message).html();
+            
             // Add message
             messagesDiv.append(`
                 <div class="msg ${cls}">
-                    ${msg.message}
+                    ${escapedMsg}
                     <br>
                     <small>${timeStr}</small>
                 </div>
@@ -81,10 +84,20 @@ jQuery(document).ready(function ($) {
         messagesDiv.scrollTop(messagesDiv[0].scrollHeight);
     }
     
-    // Function to send message
+    // Function to send message (ADDED LENGTH CHECK)
     function sendMessage() {
         const message = inputField.val().trim();
-        if (!message) return;
+        
+        // Validate message
+        if (!message) {
+            alert("Please enter a message");
+            return;
+        }
+        
+        if (message.length > MAX_MESSAGE_LENGTH) {
+            alert(`Message too long (max ${MAX_MESSAGE_LENGTH} characters)`);
+            return;
+        }
         
         $.ajax({
             url: ajaxUrl,
