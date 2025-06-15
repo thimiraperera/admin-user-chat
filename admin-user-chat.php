@@ -1,8 +1,8 @@
 <?php
 /*
 Plugin Name: Admin User Chat
-Description: Simple chat between admin and logged-in users.
-Version: 1.5
+Description: Simple chat between admin and logged-in users with email notifications.
+Version: 1.6
 Author: Thimira Perera
 */
 
@@ -42,6 +42,11 @@ function auc_install() {
     $columns = $wpdb->get_col("DESC $table", 0);
     if (!in_array('is_read', $columns)) {
         $wpdb->query("ALTER TABLE $table ADD COLUMN is_read TINYINT(1) DEFAULT 0");
+    }
+    
+    // Add option for notification email
+    if (!get_option('auc_admin_notification_email')) {
+        update_option('auc_admin_notification_email', get_option('admin_email'));
     }
 }
 
@@ -173,6 +178,12 @@ function auc_send_message() {
     ]);
     
     if ($result) {
+        // Schedule notification check only for user messages
+        if ($sender_id != $admin_id) {
+            $message_id = $wpdb->insert_id;
+            wp_schedule_single_event(time() + 60, 'auc_send_notification', [$message_id]);
+        }
+        
         wp_send_json_success();
     } else {
         wp_send_json_error('Failed to send message');
@@ -239,4 +250,51 @@ function auc_delete_chat() {
     } else {
         wp_send_json_error('Failed to delete chat history');
     }
+}
+
+// Email notification system
+add_action('auc_send_notification', 'auc_maybe_send_notification');
+function auc_maybe_send_notification($message_id) {
+    global $wpdb;
+    $table = $wpdb->prefix . 'auc_messages';
+    $admin_id = auc_get_admin_id();
+    
+    // Get the original message
+    $message = $wpdb->get_row($wpdb->prepare(
+        "SELECT * FROM $table WHERE id = %d", $message_id
+    ));
+    
+    // If message doesn't exist, do nothing
+    if (!$message) return;
+    
+    // Check if admin has already replied
+    $has_reply = $wpdb->get_var($wpdb->prepare(
+        "SELECT COUNT(*) FROM $table 
+        WHERE sender_id = %d 
+        AND receiver_id = %d 
+        AND id > %d",
+        $admin_id, $message->sender_id, $message_id
+    ));
+    
+    // If admin replied, no need to send notification
+    if ($has_reply) return;
+    
+    // Get admin email from settings
+    $admin_email = get_option('auc_admin_notification_email');
+    if (!$admin_email) return;
+    
+    // Get user info
+    $user = get_userdata($message->sender_id);
+    
+    // Prepare email content
+    $to = $admin_email;
+    $subject = 'New Chat Message Requires Attention';
+    $message_text = "Hello,\n\n";
+    $message_text .= "You have a new chat message that hasn't been replied to:\n\n";
+    $message_text .= "User: {$user->display_name} ({$user->user_email})\n";
+    $message_text .= "Message: {$message->message}\n\n";
+    $message_text .= "Please respond at: " . admin_url('admin.php?page=auc-user-chats&user_id=' . $user->ID);
+    
+    // Send email
+    wp_mail($to, $subject, $message_text);
 }

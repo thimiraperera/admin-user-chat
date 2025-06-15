@@ -17,7 +17,52 @@ add_action('admin_enqueue_scripts', function ($hook) {
 // Admin menu
 add_action('admin_menu', function () {
     add_menu_page('User Chats', 'User Chats', 'manage_options', 'auc-user-chats', 'auc_admin_chat_page', 'dashicons-format-chat', 25);
+    
+    // Add settings submenu
+    add_submenu_page(
+        'auc-user-chats',
+        'Chat Settings',
+        'Settings',
+        'manage_options',
+        'auc-chat-settings',
+        'auc_chat_settings_page'
+    );
 });
+
+// Settings page
+function auc_chat_settings_page() {
+    if (!current_user_can('manage_options')) {
+        return;
+    }
+
+    // Save settings if form submitted
+    if (isset($_POST['auc_admin_email'])) {
+        $email = sanitize_email($_POST['auc_admin_email']);
+        update_option('auc_admin_notification_email', $email);
+        echo '<div class="notice notice-success"><p>Settings saved.</p></div>';
+    }
+
+    $current_email = get_option('auc_admin_notification_email', '');
+
+    ?>
+    <div class="wrap">
+        <h1>Chat Settings</h1>
+        <form method="post">
+            <table class="form-table">
+                <tr>
+                    <th scope="row"><label for="auc_admin_email">Notification Email</label></th>
+                    <td>
+                        <input type="email" name="auc_admin_email" id="auc_admin_email" 
+                               value="<?php echo esc_attr($current_email); ?>" class="regular-text">
+                        <p class="description">Email to receive notifications when admin doesn't reply within 1 minute</p>
+                    </td>
+                </tr>
+            </table>
+            <?php submit_button('Save Settings'); ?>
+        </form>
+    </div>
+    <?php
+}
 
 // Admin chat page
 function auc_admin_chat_page() {
