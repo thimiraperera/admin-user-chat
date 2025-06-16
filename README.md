@@ -50,14 +50,6 @@ Go to **User Chats → Settings** to:
 - Adjust notification frequency (1-1440 minutes)
 - Configure email format
 
-## File Structure
-admin-user-chat/
-├── admin-chat-functions.php # Admin interface logic
-├── admin-user-chat.php # Main plugin file
-├── chat.css # Frontend + admin styles
-├── admin-chat.js # Admin chat functionality
-└── chat.js # User chat functionality
-
 ## Requirements
 
 - WordPress 5.0+
